@@ -29,25 +29,25 @@ class WaldoDataset(Dataset):
     def __init__(self, img_res: Literal["64", "128", "256"], clear_cache=False, validation_split=0.1, training=True):
         assert img_res in ["64", "128", "256"], "img_res must be either 64, 128 or 256"
         url = "https://github.com/vc1492a/Hey-Waldo"
-        
+
         if not Path("data", img_res).exists():
             subprocess.run(["git", "clone", url] )
-            
+
             Path("data").mkdir(exist_ok=True)
             if clear_cache:
                 shutil.rmtree(os.path.join("data", img_res), ignore_errors=True)
 
             shutil.copytree(os.path.join("Hey-Waldo", img_res), os.path.join("data", img_res))
-            
+
             shutil.rmtree("Hey-Waldo",ignore_errors=False, onerror=handleRemoveError)
-        
+
         self.data_path = os.path.join("data", img_res)
         self.img_names = []
         self.img_labels = []
-        
+
         with_waldo = len(os.listdir(os.path.join(self.data_path, "waldo")))
         no_waldo = len(os.listdir(os.path.join(self.data_path, "notwaldo")))
-        
+
         i = 0
         for p in os.listdir(os.path.join(self.data_path, "waldo")):
             if (training and i < (1 - validation_split) * with_waldo) or (not training and i >= (1 - validation_split) * with_waldo):
@@ -57,16 +57,18 @@ class WaldoDataset(Dataset):
 
         j = 0
         for p in os.listdir(os.path.join(self.data_path, "notwaldo")):
+            if j > i and training and False:
+                break
             if (training and j < (1 - validation_split) * no_waldo) or (not training and j >= (1 - validation_split) * no_waldo):
                 self.img_names.append(os.path.join(self.data_path, "notwaldo", p))
                 self.img_labels.append(0.0)
             j += 1
-        
+
         self.transform = intImgToViTFloat
         self.target_transform = None
-        
+
         print(f"Waldo/Total = {with_waldo/(with_waldo+no_waldo)}")
-    
+
     def __len__(self):
         return len(self.img_labels)
 
