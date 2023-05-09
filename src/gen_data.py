@@ -17,8 +17,9 @@ min_char_size = 50
 max_char_size = 150
 
 class GeneratedDataset(Dataset):
-    def __init__(self, images):
+    def __init__(self, images, start_i = 0):
         self.images = images
+        self.start_i = start_i
 
     def __len__(self):
         return self.images
@@ -26,6 +27,7 @@ class GeneratedDataset(Dataset):
     def __getitem__(self, index):
         # Deterministic on-demand image generation
         assert index < len(self)
+        index += self.start_i
 
         np.random.seed(index)
         random.seed(index)
@@ -64,4 +66,4 @@ class GeneratedDataset(Dataset):
 
         image, label = bg_tensor, label
 
-        return image, label
+        return image.to(torch.float32), label.to(torch.float32)

@@ -4,10 +4,12 @@ import torch
 from matplotlib import pyplot as plt
 from torch.utils.data.dataloader import DataLoader
 from vit import ViTNoHead
+from gen_data import GeneratedDataset
+from tqdm import tqdm, trange
 
 # [/] Create ViT With Separate Classifier
 # [ ] Implement a trainer class for unsupervised learning
-#     [/] Data Loading
+#     [x] Data Loading
 #     [x] Custom Cross Entropy Loss
 #     [x] Measure Accuracy
 #     [x] Visualisation of Training
@@ -40,8 +42,8 @@ class UnsupervisedTrainer:
         self.device = device
         assert self.batch_size % 4 == 0, "Batch size must be divisible by 4"
 
-        self.train_data = []
-        self.test_data = []
+        self.train_data = GeneratedDataset(1048)
+        self.test_data = GeneratedDataset(192, start_i=8192)
 
         self.train_loader = DataLoader(self.train_data, batch_size=4, shuffle=False)
         self.test_loader = DataLoader(self.test_data, batch_size=4, shuffle=False)
@@ -66,11 +68,18 @@ class UnsupervisedTrainer:
             label.shape[0] % 4 == 0 and label.shape[1] > 0
         ), "Target batch must be divisible by 4"
 
-        output_similarities = torch.mm(cls_token, torch.transpose(cls_token, 0, 1))
-        target_similarities = torch.mm(label, torch.transpose(label, 0, 1))
+        print(cls_token)
+        print(label)
 
-        categorical_loss = -torch.sum(
-            (torch.mul(target_similarities, torch.log(output_similarities)))
+        output_similarities = torch.mm(cls_token, torch.transpose(cls_token, 0, 1))
+        print("OUTPUT")
+        print(output_similarities)
+        target_similarities = torch.mm(label, torch.transpose(label, 0, 1))
+        print("TARGET")
+        print(target_similarities)
+
+        categorical_loss = torch.sum(
+            (target_similarities - output_similarities)**2
         )
 
         return categorical_loss
@@ -89,6 +98,7 @@ class UnsupervisedTrainer:
         return correct_by_category
 
     def train(self):
+        print("Training Vision Transformer")
         epoch_pbar = trange(self.vit_epochs)
 
         for epoch in epoch_pbar:
@@ -106,15 +116,15 @@ class UnsupervisedTrainer:
                 loss = self.loss(cls_token, y)
 
                 loss_float = loss.detach().cpu().item()
-                self.vit_train_loss_per_epoch[epoch] += loss_float / len(
+                self.vit_train_loss_per_epoch[epoch] += loss_float / (len(
                     self.train_loader
-                )
+                ) * self.batch_size)
 
                 loss.backward()
                 self.vit_opt.step()
 
                 batch_pbar.set_description(
-                    f"Batch {b}/{len(self.train_loader)}, Loss {loss_float/self.batch_size}"
+                    f"Loss {loss_float/self.batch_size:.10f}"
                 )
 
             epoch_pbar.set_description(
@@ -136,6 +146,7 @@ class UnsupervisedTrainer:
                 )
 
         self.vit.eval()
+        print("Training Classifier Head")
         epoch_pbar = trange(self.head_epochs)
 
         for epoch in epoch_pbar:
@@ -177,6 +188,9 @@ class UnsupervisedTrainer:
 
                 cls_token = self.vit(x)
                 pred = self.head(cls_token)
+                print(cls_token)
+                print(pred)
+                print(y)
                 loss = self.head_loss(pred, y)
 
                 self.head_test_loss_per_epoch[
@@ -192,7 +206,7 @@ class UnsupervisedTrainer:
         plt.legend(["Training Loss", "Testing Loss"])
 
         head_epochs = np.arange(self.head_epochs)
-        plt.subplot(1, 2, 1)
+        plt.subplot(1, 2, 2)
         plt.title("Classifier Head Training")
         plt.plot(head_epochs, self.head_train_loss_per_epoch)
         plt.plot(head_epochs, self.head_test_loss_per_epoch)
@@ -200,3 +214,23 @@ class UnsupervisedTrainer:
 
         plt.show()
 
+if __name__ == "__main__":
+    model = ViTNoHead(
+        colors=3,
+        height=256,
+        width=256,
+        n_patches=16,
+        hidden_dimension=8,
+        n_heads=4,
+        n_blocks=5
+    )
+    head = torch.nn.Sequential(
+        torch.nn.Linear(8, 2),
+        torch.nn.Softmax(dim=-1),
+    )
+    trainer = UnsupervisedTrainer(model, head, "cpu", vit_epochs=15, batch_size=32)
+
+    trainer.train()
+    trainer.plot_training_stats()
+
+    torch.save(model.state_dict(), "vitnohead.pt")
