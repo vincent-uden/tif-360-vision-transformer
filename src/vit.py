@@ -131,6 +131,28 @@ class ViTNoHead(nn.Module):
 
         return self.softmax(out)
 
+    def attention_rollout(self, image):
+        # https://storrs.io/attention-rollout/
+        self.eval()
+        n, c, h, w = image.shape
+        assert n == 1
+
+        patches = patchify(image, self.n_patches).to(self.pos_embed.device)
+        tokens = self.linear1(patches)
+
+        tokens = torch.cat((self.class_token.expand(n, 1, -1), tokens), dim=1)
+
+        out = tokens + self.pos_embed.repeat(n, 1, 1)
+        for b, block in enumerate(self.blocks):
+            if b == 0:
+                A = block.attention(out, self.n_patches, self.n_patches)
+            else:
+                A = block.attention(out, self.n_patches, self.n_patches) @ A
+            out = block(out)
+
+        return A
+
+
 class MultiHeadSelfAttention(nn.Module):
     def __init__(self, d, n_heads=2):
         super(MultiHeadSelfAttention, self).__init__()
@@ -164,6 +186,31 @@ class MultiHeadSelfAttention(nn.Module):
             result.append(torch.hstack(seq_result))
         return torch.cat([torch.unsqueeze(r, dim=0) for r in result])
 
+    def attention(self, sequence, w: int, h: int) -> np.ndarray:
+        # THIS FUNCTION ONLY TAKES ONE SEQUENCE AT A TIME
+        assert sequence.shape[0] == 1
+
+        sequence = sequence[0]
+        attentions = []
+        for head in range(self.n_heads):
+            q_mapping = self.q[head]
+            k_mapping = self.k[head]
+
+            seq = sequence[:, head * self.d_head: (head+1) * self.d_head]
+            q, k = q_mapping(seq), k_mapping(seq)
+
+            attention = self.softmax(q @ k.T / (self.d_head ** 0.5))
+            attentions.append(attention[0,:])
+
+        # TODO (Vincent): Check if the attentions are actually stored in this
+        # order. The patches are probably stored row by row in succession. That
+        # should entail a (height, width) ordering of the output.
+        att_map = np.zeros(w * h)
+        for i, att_row in enumerate(attentions):
+            att_map[i*(w//self.n_heads)**2:(i+1)*(w//self.n_heads)**2] = att_row[1:].detach()
+
+        return np.reshape(att_map, (h, w))
+
 class ViTBlock(nn.Module):
     def __init__(self, hidden_d, n_heads, mlp_ratio=4):
         super(ViTBlock, self).__init__()
@@ -183,6 +230,9 @@ class ViTBlock(nn.Module):
         out = x + self.mhsa(self.norm1(x))
         out = out + self.mlp(self.norm2(out))
         return out
+
+    def attention(self, x, w, h):
+        return self.mhsa.attention(x, w, h)
 
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

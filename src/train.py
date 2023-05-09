@@ -7,12 +7,12 @@ from vit import ViTNoHead
 
 # [/] Create ViT With Separate Classifier
 # [ ] Implement a trainer class for unsupervised learning
-#     [x] Data Loading
+#     [/] Data Loading
 #     [x] Custom Cross Entropy Loss
 #     [x] Measure Accuracy
-#     [ ] Visualisation of Training
+#     [x] Visualisation of Training
 #     [x] Train Latent Space Classifier (after ViT)
-# [ ] Extract Attention Map
+# [x] Extract Attention Map
 
 
 class UnsupervisedTrainer:
@@ -199,5 +199,4 @@ class UnsupervisedTrainer:
         plt.legend(["Training Loss", "Testing Loss"])
 
         plt.show()
-
 

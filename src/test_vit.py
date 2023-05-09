@@ -6,6 +6,7 @@ import pytest
 
 from train import UnsupervisedTrainer
 from vit import ViTNoHead
+from matplotlib import pyplot as plt
 
 def test_trainer_loss():
     model = ViTNoHead(
@@ -43,3 +44,24 @@ def test_trainer_loss():
 
     assert torch.all(loss > 0), "A loss should always be positive"
 
+def test_attention_map(show_att=False):
+    dims = 256
+    patches = 16
+    model = ViTNoHead(
+        colors=3,
+        height=dims,
+        width=dims,
+        n_patches=patches,
+        hidden_dimension=4,
+        n_heads=1,
+        n_blocks=3
+    )
+
+    test_img = torch.rand(1, 3, dims, dims)
+    att = model.attention_rollout(test_img)
+
+    assert att.shape == (patches, patches)
+
+    if show_att:
+        plt.imshow(att)
+        plt.show()
