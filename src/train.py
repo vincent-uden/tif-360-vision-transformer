@@ -68,15 +68,15 @@ class UnsupervisedTrainer:
             label.shape[0] % 4 == 0 and label.shape[1] > 0
         ), "Target batch must be divisible by 4"
 
-        print(cls_token)
-        print(label)
+        # print(cls_token)
+        # print(label)
 
         output_similarities = torch.mm(cls_token, torch.transpose(cls_token, 0, 1))
-        print("OUTPUT")
-        print(output_similarities)
+        # print("OUTPUT")
+        # print(output_similarities)
         target_similarities = torch.mm(label, torch.transpose(label, 0, 1))
-        print("TARGET")
-        print(target_similarities)
+        # print("TARGET")
+        # print(target_similarities)
 
         categorical_loss = torch.sum(
             (target_similarities - output_similarities)**2
