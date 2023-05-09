@@ -7,6 +7,8 @@ import pytest
 from train import UnsupervisedTrainer
 from vit import ViTNoHead
 from matplotlib import pyplot as plt
+from gen_data import GeneratedDataset
+from torch.utils.data.dataloader import DataLoader
 
 def test_trainer_loss():
     model = ViTNoHead(
@@ -65,3 +67,44 @@ def test_attention_map(show_att=False):
     if show_att:
         plt.imshow(att)
         plt.show()
+
+def test_image_gen(show=False):
+    dataset = GeneratedDataset(1048)
+    loader = DataLoader(dataset, batch_size=4, shuffle=False)
+
+    xs1, ys1 = [], []
+    xs2, ys2 = [], []
+
+    for i, batch in enumerate(loader):
+        x, y = batch
+        if i == 10:
+            break
+
+    if show:
+        imgs = torch.permute(x, (0, 2, 3, 1))
+        plt.subplot(1, 4, 1)
+        plt.imshow(imgs[0])
+        plt.subplot(1, 4, 2)
+        plt.imshow(imgs[1])
+        plt.subplot(1, 4, 3)
+        plt.imshow(imgs[2])
+        plt.subplot(1, 4, 4)
+        plt.imshow(imgs[3])
+
+        plt.show()
+
+    for (x, y) in loader:
+        xs1.append(x)
+        ys1.append(y)
+
+    for (x, y) in loader:
+        xs2.append(x)
+        ys2.append(y)
+
+    for (x1, x2) in zip(xs1, xs2):
+        assert (x1 == x2).all()
+
+    for (y1, y2) in zip(ys1, ys2):
+        assert (y1 == y2).all()
+
+
