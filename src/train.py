@@ -31,8 +31,8 @@ class UnsupervisedTrainer:
         self.vit = vit
         self.head = head
 
-        self.vit_opt = torch.optim.Adam(self.vit.parameters(), lr=lr)
-        self.head_opt = torch.optim.Adam(self.head.parameters(), lr=lr)
+        self.vit_opt = torch.optim.SGD(self.vit.parameters(), lr=lr, momentum=0.1)
+        self.head_opt = torch.optim.SGD(self.head.parameters(), lr=lr*10, momentum=0.1)
 
         self.head_loss = torch.nn.BCELoss()
 
@@ -42,11 +42,11 @@ class UnsupervisedTrainer:
         self.device = device
         assert self.batch_size % 4 == 0, "Batch size must be divisible by 4"
 
-        self.train_data = GeneratedDataset(1048)
-        self.test_data = GeneratedDataset(192, start_i=8192)
+        self.train_data = GeneratedDataset(128)
+        self.test_data = GeneratedDataset(16, start_i=0)
 
-        self.train_loader = DataLoader(self.train_data, batch_size=4, shuffle=False)
-        self.test_loader = DataLoader(self.test_data, batch_size=4, shuffle=False)
+        self.train_loader = DataLoader(self.train_data, batch_size=batch_size, shuffle=True)
+        self.test_loader = DataLoader(self.test_data, batch_size=batch_size, shuffle=True)
 
         # Stats
         self.vit_train_loss_per_epoch = np.zeros(self.vit_epochs)
@@ -68,19 +68,26 @@ class UnsupervisedTrainer:
             label.shape[0] % 4 == 0 and label.shape[1] > 0
         ), "Target batch must be divisible by 4"
 
+        # print("-------------------------")
         # print(cls_token)
         # print(label)
 
-        output_similarities = torch.mm(cls_token, torch.transpose(cls_token, 0, 1))
+        output_similarities = -torch.mm(cls_token, torch.log(torch.transpose(cls_token, 0, 1)))
         # print("OUTPUT")
         # print(output_similarities)
         target_similarities = torch.mm(label, torch.transpose(label, 0, 1))
+        target_unsimilarities = 1 - target_similarities
         # print("TARGET")
-        # print(target_similarities)
+        # # print(target_similarities)
+        # print(target_unsimilarities)
 
-        categorical_loss = torch.sum(
-            (target_similarities - output_similarities)**2
-        )
+        max_to_min_converted = (1/output_similarities) * target_unsimilarities
+        combined_scores = output_similarities * target_similarities + max_to_min_converted
+        # combined_scores = torch.triu(combined_scores, diagonal=1)
+        # print("SCORES")
+        # print(combined_scores)
+
+        categorical_loss = torch.sum(combined_scores)
 
         return categorical_loss
 
@@ -149,10 +156,10 @@ class UnsupervisedTrainer:
         print("Training Classifier Head")
         epoch_pbar = trange(self.head_epochs)
 
+        self.head.train()
         for epoch in epoch_pbar:
             batch_pbar = tqdm(self.train_loader, leave=False)
 
-            self.head.train()
             for batch in batch_pbar:
                 self.head_opt.zero_grad()
 
@@ -161,6 +168,9 @@ class UnsupervisedTrainer:
 
                 cls_token = self.vit(x)
                 pred = self.head(cls_token)
+                print(cls_token)
+                print(pred)
+                print(y)
                 loss = self.head_loss(pred, y)
 
                 loss_float = loss.detach().cpu().item()
@@ -188,9 +198,6 @@ class UnsupervisedTrainer:
 
                 cls_token = self.vit(x)
                 pred = self.head(cls_token)
-                print(cls_token)
-                print(pred)
-                print(y)
                 loss = self.head_loss(pred, y)
 
                 self.head_test_loss_per_epoch[
@@ -219,16 +226,19 @@ if __name__ == "__main__":
         colors=3,
         height=256,
         width=256,
-        n_patches=16,
+        n_patches=32,
         hidden_dimension=8,
-        n_heads=4,
+        n_heads=8,
         n_blocks=5
     )
     head = torch.nn.Sequential(
-        torch.nn.Linear(8, 2),
+        torch.nn.Linear(8, 16),
+        torch.nn.ReLU(),
+        torch.nn.Linear(16, 2),
+        torch.nn.ReLU(),
         torch.nn.Softmax(dim=-1),
     )
-    trainer = UnsupervisedTrainer(model, head, "cpu", vit_epochs=15, batch_size=32)
+    trainer = UnsupervisedTrainer(model, head, "cpu", vit_epochs=5, batch_size=4, lr=0.001, head_epochs=5)
 
     trainer.train()
     trainer.plot_training_stats()
