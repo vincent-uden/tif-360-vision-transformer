@@ -48,7 +48,8 @@ class GeneratedDataset(Dataset):
         bg_x, bg_y = bg.size
         im = Image.open(charString)
         im = im.resize((size_rand,size_rand))
-        rand_pert = np.random.randint(0, 4)
+        # rand_pert = np.random.randint(0, 4)
+        rand_pert = 3
 
         if rand_pert == 0:
             im = ImageOps.flip(im)

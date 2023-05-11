@@ -129,7 +129,8 @@ class ViTNoHead(nn.Module):
 
         out = out[:, 0]
 
-        return self.softmax(out)
+        # return self.softmax(out)
+        return out
 
     def attention_rollout(self, image):
         # https://storrs.io/attention-rollout/
