@@ -6,6 +6,7 @@ from torch.utils.data.dataloader import DataLoader
 from vit import ViTNoHead
 from gen_data import GeneratedDataset
 from tqdm import tqdm, trange
+from sklearn.manifold import TSNE
 
 # [/] Create ViT With Separate Classifier
 # [ ] Implement a trainer class for unsupervised learning
@@ -46,13 +47,13 @@ class UnsupervisedTrainer:
         assert self.batch_size % 4 == 0, "Batch size must be divisible by 4"
 
         self.train_data = GeneratedDataset(256)
-        self.test_data = GeneratedDataset(128, start_i=0)
+        self.test_data = GeneratedDataset(128, start_i=256)
 
         self.train_loader = DataLoader(
-            self.train_data, batch_size=batch_size, shuffle=False
+            self.train_data, batch_size=batch_size, shuffle=True
         )
         self.test_loader = DataLoader(
-            self.test_data, batch_size=batch_size, shuffle=False
+            self.test_data, batch_size=batch_size, shuffle=True
         )
 
         # Stats
@@ -125,7 +126,6 @@ class UnsupervisedTrainer:
             batch_pbar = tqdm(self.train_loader, leave=False)
 
             self.vit.train()
-            b = 0
             for batch in batch_pbar:
                 self.vit_opt.zero_grad()
 
@@ -180,9 +180,6 @@ class UnsupervisedTrainer:
 
                 cls_token = self.vit(x)
                 pred = self.head(cls_token)
-                print(cls_token)
-                print(pred)
-                print(y)
                 loss = self.head_loss(pred, y)
 
                 loss_float = loss.detach().cpu().item()
@@ -194,7 +191,7 @@ class UnsupervisedTrainer:
                 self.head_opt.step()
 
                 batch_pbar.set_description(
-                    f"Batch {b}/{len(self.train_loader)}, Loss {loss_float/self.batch_size}"
+                    f"Loss {loss_float/self.batch_size}"
                 )
 
             epoch_pbar.set_description(
@@ -233,6 +230,35 @@ class UnsupervisedTrainer:
 
         plt.show()
 
+    def tsne_vit_plot(self):
+        tsne = TSNE(n_components=2, verbose=1, random_state=123)
+        self.vit.eval()
+
+        tokens = []
+        colors = []
+        labels = []
+        values = []
+        for batch in tqdm(self.test_loader):
+            x, y = batch
+            x, y = x.to(self.device), y.to(self.device)
+            for row in y:
+                if row[0]:
+                    colors.append((1, 0, 0))
+                    labels.append("Waldo")
+                    values.append(1)
+                else:
+                    colors.append((0, 0, 1))
+                    labels.append("Not Waldo")
+                    values.append(0)
+            cls_token = self.vit(x).detach().cpu().numpy()
+            tokens.append(cls_token)
+
+        tokens = np.concatenate(tokens)
+        z = tsne.fit_transform(tokens)
+
+        scatter = plt.scatter(z[:,0], z[:,1], c=values, cmap="rainbow")
+        plt.legend(handles=scatter.legend_elements()[0], labels=["Waldo", "Not Waldo"])
+        plt.show()
 
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -247,12 +273,14 @@ if __name__ == "__main__":
         n_blocks=10,
     )
     head = torch.nn.Sequential(
-        torch.nn.Linear(d_h, 16),
-        torch.nn.ReLU(),
-        torch.nn.Linear(16, 2),
-        torch.nn.ReLU(),
-        torch.nn.Softmax(dim=-1),
+        torch.nn.Linear(d_h, 2),
+        #torch.nn.ReLU(),
+        #torch.nn.Linear(16, 2),
+        torch.nn.Sigmoid(),
+        # torch.nn.Softmax(dim=-1),
     )
+
+    model.load_state_dict(torch.load("vitnohead_shuffle2.pt"))
 
     model.to(device)
     head.to(device)
@@ -265,11 +293,14 @@ if __name__ == "__main__":
         batch_size=4,
         vit_lr=0.001,
         head_lr=0.001,
-        head_epochs=5,
+        head_epochs=50,
     )
 
-    trainer.train_vit()
-    train.train_head()
+    trainer.tsne_vit_plot()
+
+    # trainer.train_vit()
+    # torch.save(model.state_dict(), "vitnohead_shuffle2.pt")
+    trainer.train_head()
+    torch.save(head.state_dict(), "head_shuffle2.pt")
     trainer.plot_training_stats()
 
-    torch.save(model.state_dict(), "vitnohead.pt")
