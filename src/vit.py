@@ -132,7 +132,7 @@ class ViTNoHead(nn.Module):
         # return self.softmax(out)
         return out
 
-    def attention_rollout(self, image):
+    def attention_rollout(self, image, head_pooling=np.max):
         # https://storrs.io/attention-rollout/
         self.eval()
         n, c, h, w = image.shape
@@ -146,9 +146,9 @@ class ViTNoHead(nn.Module):
         out = tokens + self.pos_embed.repeat(n, 1, 1)
         for b, block in enumerate(self.blocks):
             if b == 0:
-                A = block.attention(out, self.n_patches, self.n_patches)
+                A = block.attention(out, self.n_patches, self.n_patches, head_pooling)
             else:
-                A = block.attention(out, self.n_patches, self.n_patches) @ A
+                A = block.attention(out, self.n_patches, self.n_patches, head_pooling) @ A
             out = block(out)
 
         return A
@@ -187,12 +187,13 @@ class MultiHeadSelfAttention(nn.Module):
             result.append(torch.hstack(seq_result))
         return torch.cat([torch.unsqueeze(r, dim=0) for r in result])
 
-    def attention(self, sequence, w: int, h: int) -> np.ndarray:
+    def attention(self, sequence, w: int, h: int, head_pooling=np.max) -> np.ndarray:
         # THIS FUNCTION ONLY TAKES ONE SEQUENCE AT A TIME
         assert sequence.shape[0] == 1
 
         sequence = sequence[0]
-        attentions = []
+        # Remove cls token self correlation
+        attentions = np.zeros((self.n_heads, sequence.shape[0] - 1))
         for head in range(self.n_heads):
             q_mapping = self.q[head]
             k_mapping = self.k[head]
@@ -201,14 +202,13 @@ class MultiHeadSelfAttention(nn.Module):
             q, k = q_mapping(seq), k_mapping(seq)
 
             attention = self.softmax(q @ k.T / (self.d_head ** 0.5))
-            attentions.append(attention[0,:])
+            attentions[head,:] = attention[0,1:].detach().numpy()
 
         # TODO (Vincent): Check if the attentions are actually stored in this
         # order. The patches are probably stored row by row in succession. That
         # should entail a (height, width) ordering of the output.
-        att_map = np.zeros(w * h)
-        for i, att_row in enumerate(attentions):
-            att_map[i*(w//self.n_heads)**2:(i+1)*(w//self.n_heads)**2] = att_row[1:].detach()
+        att_map = np.zeros(h * w)
+        att_map = head_pooling(attentions, axis=0)
 
         return np.reshape(att_map, (h, w))
 
@@ -232,8 +232,8 @@ class ViTBlock(nn.Module):
         out = out + self.mlp(self.norm2(out))
         return out
 
-    def attention(self, x, w, h):
-        return self.mhsa.attention(x, w, h)
+    def attention(self, x, w, h, head_pooling=np.max):
+        return self.mhsa.attention(x, w, h, head_pooling)
 
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

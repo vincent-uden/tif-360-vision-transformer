@@ -3,6 +3,8 @@ warnings.filterwarnings("ignore")
 
 import torch
 import pytest
+import numpy as np
+import scipy
 
 from train import UnsupervisedTrainer
 from vit import ViTNoHead
@@ -46,6 +48,20 @@ def test_trainer_loss():
 
     assert torch.all(loss > 0), "A loss should always be positive"
 
+def interp_att_map(att: np.ndarray) -> np.ndarray:
+    X = np.linspace(0, 256, 16)
+    Y = np.linspace(0, 256, 16)
+    x,y = np.meshgrid(X, Y)
+    print(att.shape)
+    print(X, Y)
+
+    f = scipy.interpolate.RectBivariateSpline(X, Y, att)
+
+    Xnew = np.linspace(0, 256, 256)
+    Ynew = np.linspace(0, 256, 256)
+
+    return f(Xnew, Ynew)
+
 def test_attention_map(show_att=False):
     dims = 256
     patches = 16
@@ -54,18 +70,39 @@ def test_attention_map(show_att=False):
         height=dims,
         width=dims,
         n_patches=patches,
-        hidden_dimension=4,
-        n_heads=1,
-        n_blocks=3
+        hidden_dimension=32,
+        n_heads=8,
+        n_blocks=10
+    )
+    model.load_state_dict(torch.load("vitnohead_shuffle2.pt", map_location=torch.device("cpu")))
+
+    test_data = GeneratedDataset(128, start_i=256)
+    test_loader = DataLoader(
+        test_data, batch_size=1, shuffle=True
     )
 
-    test_img = torch.rand(1, 3, dims, dims)
-    att = model.attention_rollout(test_img)
-
-    assert att.shape == (patches, patches)
+    test_img, _ = next(iter(test_loader))
+    print(test_img.shape)
+    att = interp_att_map(model.attention_rollout(test_img))
+    att = att / np.max(att)
+    att_mean = interp_att_map(model.attention_rollout(test_img, np.mean))
+    att_mean = att_mean / np.max(att_mean)
+    att_min = interp_att_map(model.attention_rollout(test_img, np.min))
+    att_min = att_min / np.max(att_min)
 
     if show_att:
-        plt.imshow(att)
+        plt.subplot(2, 2, 1)
+        plt.imshow(test_img[0].permute(1, 2, 0))
+        plt.title("Source Image")
+        plt.subplot(2, 2, 2)
+        plt.imshow(test_img[0].permute(1, 2, 0) * np.repeat(att[:,:,np.newaxis], 3, axis=2))
+        plt.title("Max Attention")
+        plt.subplot(2, 2, 3)
+        plt.imshow(test_img[0].permute(1, 2, 0) * np.repeat(att_mean[:,:,np.newaxis], 3, axis=2))
+        plt.title("Mean Attention")
+        plt.subplot(2, 2, 4)
+        plt.imshow(test_img[0].permute(1, 2, 0) * np.repeat(att_min[:,:,np.newaxis], 3, axis=2))
+        plt.title("Min Attention")
         plt.show()
 
 def test_image_gen(show=False):
