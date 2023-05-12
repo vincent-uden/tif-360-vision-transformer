@@ -3,6 +3,7 @@ import torch
 
 from matplotlib import pyplot as plt
 from torch.utils.data.dataloader import DataLoader
+from torch.utils.data import TensorDataset
 from vit import ViTNoHead
 from gen_data import GeneratedDataset
 from tqdm import tqdm, trange
@@ -163,22 +164,44 @@ class UnsupervisedTrainer:
                     len(self.test_loader) * self.batch_size
                 )
 
+    def cache_vit_outputs(self, dataloader: DataLoader) -> DataLoader:
+        head_X = torch.zeros((len(dataloader) * self.batch_size, self.vit.hidden_dimension)).cpu()
+        head_Y = torch.zeros((len(dataloader) * self.batch_size, 2)).cpu()
+
+        b = 0
+        for batch in tqdm(dataloader, position=0, leave=True):
+            x, y = batch
+            x = x.to(self.device)
+
+            head_X[b*self.batch_size:(b+1)*self.batch_size,:] = self.vit(x).detach().cpu()
+            head_Y[b*self.batch_size:(b+1)*self.batch_size,:] = y
+            b += 1
+
+            del x
+
+        dset = TensorDataset(head_X, head_Y)
+        return DataLoader(dset, batch_size=self.batch_size, shuffle=True)
+
     def train_head(self):
         self.vit.eval()
-        print("Training Classifier Head")
-        epoch_pbar = trange(self.head_epochs)
 
+        print("Caching training data for head training")
+        head_train = self.cache_vit_outputs(self.train_loader)
+        print("Caching testing data for head training")
+        head_test = self.cache_vit_outputs(self.test_loader)
+        print("Training Classifier Head")
+
+        epoch_pbar = trange(self.head_epochs)
         self.head.train()
         for epoch in epoch_pbar:
-            batch_pbar = tqdm(self.train_loader, leave=False)
+            batch_pbar = tqdm(head_train, leave=False)
 
             for batch in batch_pbar:
                 self.head_opt.zero_grad()
 
                 x, y = batch
-                x, y = x.to(self.device), y.to(self.device)
+                cls_token, y = x.to(self.device), y.to(self.device)
 
-                cls_token = self.vit(x)
                 pred = self.head(cls_token)
                 loss = self.head_loss(pred, y)
 
@@ -198,14 +221,13 @@ class UnsupervisedTrainer:
                 f"Epoch {epoch}/{self.head_epochs}, Loss {self.head_train_loss_per_epoch[epoch]}"
             )
 
-            batch_pbar = tqdm(self.test_loader, leave=False)
+            batch_pbar = tqdm(head_test, leave=False)
 
             self.head.eval()
             for batch in batch_pbar:
                 x, y = batch
-                x, y = x.to(self.device), y.to(self.device)
+                cls_token, y = x.to(self.device), y.to(self.device)
 
-                cls_token = self.vit(x)
                 pred = self.head(cls_token)
                 loss = self.head_loss(pred, y)
 
@@ -274,10 +296,7 @@ if __name__ == "__main__":
     )
     head = torch.nn.Sequential(
         torch.nn.Linear(d_h, 2),
-        #torch.nn.ReLU(),
-        #torch.nn.Linear(16, 2),
         torch.nn.Sigmoid(),
-        # torch.nn.Softmax(dim=-1),
     )
 
     model.load_state_dict(torch.load("vitnohead_shuffle2.pt"))
@@ -301,6 +320,6 @@ if __name__ == "__main__":
     # trainer.train_vit()
     # torch.save(model.state_dict(), "vitnohead_shuffle2.pt")
     trainer.train_head()
-    torch.save(head.state_dict(), "head_shuffle2.pt")
+    torch.save(head.state_dict(), "head_shuffle3.pt")
     trainer.plot_training_stats()
 
