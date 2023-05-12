@@ -74,7 +74,7 @@ def test_attention_map(show_att=False):
         n_heads=8,
         n_blocks=10
     )
-    model.load_state_dict(torch.load("vitnohead_shuffle2.pt", map_location=torch.device("cpu")))
+    model.load_state_dict(torch.load("./cache/vitnohead_shuffle_epoch_39.pt", map_location=torch.device("cpu")))
 
     test_data = GeneratedDataset(128, start_i=256)
     test_loader = DataLoader(

@@ -47,8 +47,8 @@ class UnsupervisedTrainer:
         self.device = device
         assert self.batch_size % 4 == 0, "Batch size must be divisible by 4"
 
-        self.train_data = GeneratedDataset(256)
-        self.test_data = GeneratedDataset(128, start_i=256)
+        self.train_data = GeneratedDataset(8192)
+        self.test_data = GeneratedDataset(512, start_i=8192)
 
         self.train_loader = DataLoader(
             self.train_data, batch_size=batch_size, shuffle=True
@@ -63,6 +63,9 @@ class UnsupervisedTrainer:
 
         self.head_train_loss_per_epoch = np.zeros(self.head_epochs)
         self.head_test_loss_per_epoch = np.zeros(self.head_epochs)
+
+        self.trained_vit = False
+        self.trained_head = False
 
     def loss(self, cls_token: torch.Tensor, label: torch.Tensor) -> torch.Tensor:
         # I expect the label to be on the form
@@ -120,6 +123,7 @@ class UnsupervisedTrainer:
         return correct_by_category
 
     def train_vit(self):
+        self.trained_vit = True
         print("Training Vision Transformer")
         epoch_pbar = trange(self.vit_epochs)
 
@@ -151,6 +155,9 @@ class UnsupervisedTrainer:
             )
 
             batch_pbar = tqdm(self.test_loader, leave=False)
+
+            if (epoch + 1) % 20 == 0:
+                torch.save(self.vit.state_dict(), f"./cache/vitnohead_shuffle_epoch_{epoch}.pt")
 
             self.vit.eval()
             for batch in batch_pbar:
@@ -184,6 +191,7 @@ class UnsupervisedTrainer:
 
     def train_head(self):
         self.vit.eval()
+        self.trained_head = True
 
         print("Caching training data for head training")
         head_train = self.cache_vit_outputs(self.train_loader)
@@ -194,9 +202,8 @@ class UnsupervisedTrainer:
         epoch_pbar = trange(self.head_epochs)
         self.head.train()
         for epoch in epoch_pbar:
-            batch_pbar = tqdm(head_train, leave=False)
 
-            for batch in batch_pbar:
+            for batch in head_train:
                 self.head_opt.zero_grad()
 
                 x, y = batch
@@ -213,18 +220,12 @@ class UnsupervisedTrainer:
                 loss.backward()
                 self.head_opt.step()
 
-                batch_pbar.set_description(
-                    f"Loss {loss_float/self.batch_size}"
-                )
-
             epoch_pbar.set_description(
                 f"Epoch {epoch}/{self.head_epochs}, Loss {self.head_train_loss_per_epoch[epoch]}"
             )
 
-            batch_pbar = tqdm(head_test, leave=False)
-
             self.head.eval()
-            for batch in batch_pbar:
+            for batch in head_test:
                 x, y = batch
                 cls_token, y = x.to(self.device), y.to(self.device)
 
@@ -236,21 +237,30 @@ class UnsupervisedTrainer:
                 ] += loss.detach().cpu().item() / len(self.test_loader)
 
     def plot_training_stats(self):
-        vit_epochs = np.arange(self.vit_epochs)
-        plt.subplot(1, 2, 1)
-        plt.title("ViT Training")
-        plt.plot(vit_epochs, self.vit_train_loss_per_epoch)
-        plt.plot(vit_epochs, self.vit_test_loss_per_epoch)
-        plt.legend(["Training Loss", "Testing Loss"])
+        graph_count = 0
+        if self.trained_vit:
+            graph_count += 1
+        if self.trained_head:
+            graph_count += 1
 
-        head_epochs = np.arange(self.head_epochs)
-        plt.subplot(1, 2, 2)
-        plt.title("Classifier Head Training")
-        plt.plot(head_epochs, self.head_train_loss_per_epoch)
-        plt.plot(head_epochs, self.head_test_loss_per_epoch)
-        plt.legend(["Training Loss", "Testing Loss"])
+        if self.trained_vit:
+            vit_epochs = np.arange(self.vit_epochs)
+            plt.subplot(1, graph_count, 1)
+            plt.title("ViT Training")
+            plt.plot(vit_epochs, self.vit_train_loss_per_epoch)
+            plt.plot(vit_epochs, self.vit_test_loss_per_epoch)
+            plt.legend(["Training Loss", "Testing Loss"])
 
-        plt.show()
+        if self.trained_head:
+            head_epochs = np.arange(self.head_epochs)
+            plt.subplot(1, graph_count, graph_count)
+            plt.title("Classifier Head Training")
+            plt.plot(head_epochs, self.head_train_loss_per_epoch)
+            plt.plot(head_epochs, self.head_test_loss_per_epoch)
+            plt.legend(["Training Loss", "Testing Loss"])
+
+        if graph_count > 0:
+            plt.show()
 
     def tsne_vit_plot(self):
         tsne = TSNE(n_components=2, verbose=1, random_state=123)
@@ -299,7 +309,7 @@ if __name__ == "__main__":
         torch.nn.Sigmoid(),
     )
 
-    model.load_state_dict(torch.load("vitnohead_shuffle2.pt"))
+    # model.load_state_dict(torch.load("vitnohead_shuffle3.pt"))
 
     model.to(device)
     head.to(device)
@@ -308,18 +318,21 @@ if __name__ == "__main__":
         model,
         head,
         device,
-        vit_epochs=300,
+        vit_epochs=50,
         batch_size=4,
         vit_lr=0.001,
         head_lr=0.001,
-        head_epochs=50,
+        head_epochs=300,
     )
 
-    trainer.tsne_vit_plot()
+    # trainer.tsne_vit_plot()
 
-    # trainer.train_vit()
+    trainer.train_vit()
     # torch.save(model.state_dict(), "vitnohead_shuffle2.pt")
-    trainer.train_head()
-    torch.save(head.state_dict(), "head_shuffle3.pt")
+    # trainer.train_head()
+    # torch.save(head.state_dict(), "head_shuffle3.pt")
+    np.save("cache/vit_train_loss.npy", trainer.vit_train_loss_per_epoch)
+    np.save("cache/vit_test_loss.npy", trainer.vit_test_loss_per_epoch)
     trainer.plot_training_stats()
+
 
