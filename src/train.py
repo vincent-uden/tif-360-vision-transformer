@@ -318,8 +318,8 @@ if __name__ == "__main__":
         model,
         head,
         device,
-        vit_epochs=50,
-        batch_size=4,
+        vit_epochs=100,
+        batch_size=16,
         vit_lr=0.001,
         head_lr=0.001,
         head_epochs=300,
@@ -328,7 +328,7 @@ if __name__ == "__main__":
     # trainer.tsne_vit_plot()
 
     trainer.train_vit()
-    # torch.save(model.state_dict(), "vitnohead_shuffle2.pt")
+    torch.save(model.state_dict(), "vitnohead_shuffle_long.pt")
     # trainer.train_head()
     # torch.save(head.state_dict(), "head_shuffle3.pt")
     np.save("cache/vit_train_loss.npy", trainer.vit_train_loss_per_epoch)
